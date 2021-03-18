@@ -1,0 +1,8 @@
+{
+    "RoslynExtensionsOptions": {
+        "EnableAnalyzersSupport": true,
+        "LocationPaths": [
+            "./nuget/microsoft.unity.analyzers.1.10.0"
+        ]
+    }
+}
