@@ -11,14 +11,13 @@ public class MovingSphere : MonoBehaviour
     readonly float m_maxAcceleration = 10f;
 
     [SerializeField]
-    Rect m_allowedArea = new(-5f, -5f, 10f, 10f);
+    Rect m_allowedArea = new Rect(-5f, -5f, 10f, 10f);
 
     [SerializeField, Range(0f, 1f)]
     readonly float bounciness = 0.5f;
 
     Vector3 m_velocity;
 
-    // Update is called once per frame
     void Update()
     {
         Vector2 playerInput;
@@ -31,13 +30,6 @@ public class MovingSphere : MonoBehaviour
         m_velocity.z = Mathf.MoveTowards(m_velocity.z, desiredVelocity.z, maxSpeedChange);
 
         Vector3 newPosition = transform.position + m_velocity * Time.deltaTime;
-        // if (!m_allowedArea.Contains(new Vector2(newPosition.x, newPosition.z)))
-        // {
-
-        //     newPosition.x = Mathf.Clamp(newPosition.x, m_allowedArea.xMin, m_allowedArea.xMax);
-        //     newPosition.z = Mathf.Clamp(newPosition.z, m_allowedArea.yMin, m_allowedArea.yMax);
-        //     //todo 加入弹性
-        // }
 
         if (newPosition.x < m_allowedArea.xMin)
         {
