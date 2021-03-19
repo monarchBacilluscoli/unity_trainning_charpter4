@@ -199,7 +199,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 58480523}
   m_LocalRotation: {x: 0.38268343, y: 0, z: 0, w: 0.92387956}
-  m_LocalPosition: {x: 0, y: 10, z: -10}
+  m_LocalPosition: {x: 0, y: 5, z: -5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 0}
@@ -217,6 +217,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1d42375a2f5e7f8418720ecded10d8ce, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  m_focus: {fileID: 1912417185}
+  m_distatnce: 5
 --- !u!1 &216285855
 GameObject:
   m_ObjectHideFlags: 0
@@ -541,6 +543,12 @@ Mesh:
     offset: 0
     size: 0
     path: 
+--- !u!4 &1912417185 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 2284759037895039041, guid: d71b4fffa0ce7cc4ababae41311709b6,
+    type: 3}
+  m_PrefabInstance: {fileID: 1239883601}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &4014163754585467130
 Transform:
   m_ObjectHideFlags: 0

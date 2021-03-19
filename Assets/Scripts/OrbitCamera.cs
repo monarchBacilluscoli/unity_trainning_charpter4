@@ -18,6 +18,7 @@ public class OrbitCamera : MonoBehaviour
     /// </summary>
     [SerializeField]
     float m_distatnce = 5f;
+    #endregion // 设定参数
 
     // Start is called before the first frame update
     void Start()
