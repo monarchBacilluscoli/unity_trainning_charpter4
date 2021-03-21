@@ -350,7 +350,6 @@ public class MovingSphere2 : MonoBehaviour
         float currentZ = Vector3.Dot(m_velocity, zAxis);
         // 拿到加速度
         float acceleration = OnGround ? m_maxAcceleration : m_maxAirAcceleration;
-        Debug.Log(OnGround);
         float maxSpeedChange = acceleration * Time.deltaTime;
         // 计算当前应到速度
         float newX = Mathf.MoveTowards(currentX, m_desiredVelocity.x, maxSpeedChange);
