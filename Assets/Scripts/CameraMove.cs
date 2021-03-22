@@ -1,24 +1,35 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+﻿using UnityEngine;
 
+/// <summary>
+/// 简单处理镜头跟随的逻辑
+/// </summary>
 public class CameraMove : MonoBehaviour
 {
-    public Transform target;
+    /// <summary>
+    /// 跟随目标
+    /// </summary>
+    public Transform m_target;
 
     /// <summary>
     /// 起始offset，在移动中固定
     /// </summary>
     Vector3 m_offset;
-    // Start is called before the first frame update
+
+    /// <summary>
+    /// Update前调用
+    /// 记录和目标的offset
+    /// </summary>
     void Start()
     {
-        m_offset = transform.position - target.position;
+        m_offset = transform.position - m_target.position;
     }
 
-    // Update is called once per frame
+    /// <summary>
+    /// 逐帧调用
+    /// 更新相机位置
+    /// </summary>
     void Update()
     {
-        transform.position = target.position + m_offset;
+        transform.position = m_target.position + m_offset;
     }
 }

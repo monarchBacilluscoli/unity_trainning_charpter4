@@ -1,6 +1,4 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+﻿using UnityEngine;
 
 [RequireComponent(typeof(Camera))] // 表明这个实例需要一个camera    
 public class OrbitCamera : MonoBehaviour
@@ -19,12 +17,22 @@ public class OrbitCamera : MonoBehaviour
     [SerializeField]
     float m_distatnce = 5f;
 
+    /// <summary>
+    /// 焦点半径
+    /// </summary>
     [SerializeField]
     float m_focusRadius = 3f;
 
+    /// <summary>
+    /// 焦点修正速度参数，
+    /// 越大越快
+    /// </summary>
     [SerializeField]
     float m_focusCentering = 0.5f;
 
+    /// <summary>
+    /// 相机旋转速度
+    /// </summary>
     [SerializeField, Range(1f, 360f)]
     float m_rotationSpeed = 90f;
 
@@ -85,6 +93,11 @@ public class OrbitCamera : MonoBehaviour
 
     #region properties
 
+    /// <summary>
+    /// 计算以相机近平面边长各1/2的深度为0的长方体
+    /// 用于被遮挡时进行检测并移动
+    /// </summary>
+    /// <value>以相机近平面边长各1/2的深度为0的长方体</value>
     Vector3 CameraHalfExtends
     {
         get
@@ -99,6 +112,9 @@ public class OrbitCamera : MonoBehaviour
 
     #endregion //properties
 
+    /// <summary>
+    /// 初始化时被调用
+    /// </summary>
     void Awake()
     {
         m_regularCamera = GetComponent<Camera>();
@@ -108,6 +124,9 @@ public class OrbitCamera : MonoBehaviour
         transform.localRotation = Quaternion.Euler(m_orbitAngles);
     }
 
+    /// <summary>
+    /// hot reload调用
+    /// </summary>
     void OnValidate()
     {
         if (m_maxVerticalAngle < m_minVerticalAngle)
@@ -116,29 +135,32 @@ public class OrbitCamera : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Update之后被调用
+    /// 防止当前Update物体移动，导致相机追踪不正确
+    /// </summary>
     void LateUpdate()
     {
-        // 更新当前跟随目标
+        // 1. 更新当前跟随目标
         UpdateFocusPoint();
-        // 得到输入旋转
+        // 2. 得到输入旋转
         Quaternion lookRotation;
-        // 只有在输入/自动调整有效的情况下
+        // 3. 只有在输入/自动调整有效的情况下
         if (ManualRotation() || AutomaticRotation())
         {
-            // 限定输入旋转角度
+            // 4. 限定输入旋转角度
             ConstrainAngles();
-            // 进行旋转计算
+            // 5. 进行旋转计算
             lookRotation = Quaternion.Euler(m_orbitAngles);
         }
         else
         {
-            // 将旋转仍置于当前状态
+            // 6. 将旋转仍置于当前状态
             lookRotation = transform.localRotation; // 虽然多了一次赋值但是结构更为简明
         }
-        // 得到当前旋转quaternion并更新相机位置和旋转
+        // 7. 得到当前旋转quaternion并更新相机位置和旋转
         Vector3 lookDirection = lookRotation * Vector3.forward; //! 注意forward在transform里...
         Vector3 lookPosition = m_focusPoint - lookDirection * m_distatnce;
-
         Vector3 rectOffset = lookDirection * m_regularCamera.nearClipPlane;
         Vector3 rectPosition = lookPosition + rectOffset;
         Vector3 castFrom = m_focus.position;
@@ -146,7 +168,7 @@ public class OrbitCamera : MonoBehaviour
         float castDistance = castLine.magnitude;
         Vector3 castDirection = castLine / castDistance;
 
-        // 处理相机和focus之间的遮挡
+        // 8. 处理相机和focus之间的遮挡
         if (Physics.BoxCast(castFrom, CameraHalfExtends, castDirection, out RaycastHit hit, lookRotation, castDistance, obstructionMask)) // box本身不包含方向
         {
             lookPosition = m_focusPoint - lookDirection * (hit.distance + m_regularCamera.nearClipPlane);
@@ -154,43 +176,52 @@ public class OrbitCamera : MonoBehaviour
         transform.SetPositionAndRotation(lookPosition, lookRotation);
     }
 
+    /// <summary>
+    /// 更新相机注视位置
+    /// </summary>
     void UpdateFocusPoint()
     {
+        // 1. 更新当前和前一帧的注视位置
         m_previousFocusPoint = m_focusPoint;
         Vector3 targetPoint = m_focus.position;
-        // 如果设定了焦点半径
+        // 2. 如果设定了焦点半径
         if (m_focusRadius > 0f)
         {
             float distance = Vector3.Distance(targetPoint, m_focusPoint);
-            // 如果目标跑出当前焦点半径外
+            // 3. 如果目标跑出当前焦点半径外
             if (distance > m_focusRadius)
             {
-                // 更新摄像机焦点至目标边缘
+                // 4. 更新摄像机焦点至目标边缘
                 m_focusPoint = Vector3.Lerp(targetPoint, m_focusPoint, m_focusRadius / distance);
             }
-            // 如果目标并没有到半径外，但半径内处于拉动区域
+            // 5. 如果目标并没有到半径外，但在半径内处于拉动区域
             if (distance > 0.01f && m_focusCentering > 0f) // 设定平滑拉动阈值（0.01f），否则会接近无限插值
             {
+                // 6. 进行平滑拉动
                 m_focusPoint = Vector3.Lerp(
                     targetPoint, m_focusPoint,
                     Mathf.Pow(1f - m_focusCentering, Time.unscaledDeltaTime)
                 );
             }
         }
-        // 否则设置紧随
+        // 7. 否则设置紧随
         else
         {
             m_focusPoint = targetPoint;
         }
     }
 
+    /// <summary>
+    /// 根据手动输入处理旋转
+    /// </summary>
+    /// <returns>是否需要更新旋转</returns>
     bool ManualRotation()
     {
-        // 获得输入
+        // 1. 获得输入
         Vector2 input = new Vector2(
             Input.GetAxis("Vertical Camera"),
             Input.GetAxis("Horizontal Camera"));
-        // 根据输入设定rotation角度，仅考虑大于某个阈值的输入
+        // 2. 根据输入设定rotation角度，仅考虑大于某个阈值的输入
         const float e = 0.001f;
         if (input.x > e || input.x < -e || input.y > e || input.y < -e)
         {
@@ -198,14 +229,18 @@ public class OrbitCamera : MonoBehaviour
             m_lastManualRotationTime = Time.unscaledTime; // 这次没有delta
             return true;
         }
+        // 3. 否则返回不更新
         return false;
     }
 
+    /// <summary>
+    /// 限定上下旋转角极限
+    /// </summary>
     void ConstrainAngles()
     {
-        // 限定旋转角度到上下界
+        // 1. 限定旋转角度到上下界
         m_orbitAngles.x = Mathf.Clamp(m_orbitAngles.x, m_minVerticalAngle, m_maxVerticalAngle);
-        // 保证限定后的角度在0-360范围之内，否则可能会发生正转一度最后反转359度的情况估计
+        // 2. 保证限定后的角度在0-360范围之内，否则可能会发生正转一度最后反转359度的情况估计
         if (m_orbitAngles.y < 0f)
         {
             m_orbitAngles.y += 360f;
@@ -216,40 +251,44 @@ public class OrbitCamera : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 自动更新旋转
+    /// </summary>
+    /// <returns>是否需要更新</returns>
     bool AutomaticRotation()
     {
+        // 1. 如果AFK时间过短则不进行自动控制
         if (Time.unscaledTime - m_lastManualRotationTime < m_alignDelay)
         {
             return false;
         }
-        // 更新上次位移
+        // 2. 更新上次位移
         Vector2 movement = new Vector2(
             m_focusPoint.x - m_previousFocusPoint.x,
             m_focusPoint.z - m_previousFocusPoint.z
         );
-        Debug.Log(movement);
         float movementDeltaSqr = movement.sqrMagnitude;
         if (movementDeltaSqr < 0.000001f)
         {
             return false;
         }
-        // 得到移动的前方向角度
+        // 3. 得到移动的前方向角度
         float headingAngle = GetAngle(movement / Mathf.Sqrt(movementDeltaSqr));
-        // 计算视野前方和移动角度之间的最小差异
+        // 4. 计算视野前方和移动角度之间的最小差异
         float deltaAbs = Mathf.Abs(Mathf.DeltaAngle(m_orbitAngles.y, headingAngle));
-        // 将小的移动差异以更小的速度来处理旋转
+        // 5. 将小的移动差异以更小的速度来处理旋转
         float rotationChange = m_rotationSpeed * Mathf.Min(Time.unscaledDeltaTime, movementDeltaSqr);
-        // 将小的角度变动以更小的速度处理掉
+        // 6. 将小的角度变动以更小的速度处理掉
         if (deltaAbs < m_alignSmoothRange)
         {
             rotationChange *= deltaAbs / m_alignSmoothRange;
         }
-        // 在回转180度刚开始的时候以一个较小小的旋转速度处理（因为这其实也算是一个小的移动有时）
+        // 7. 在回转180度刚开始的时候以一个较小小的旋转速度处理（因为这其实也算是一个小的移动有时）
         else if (180f - deltaAbs < m_alignSmoothRange)
         {
             rotationChange *= (180f - deltaAbs) / m_alignSmoothRange;
         }
-        // 设置旋转角度
+        // 8. 设置旋转角度
         m_orbitAngles.y = Mathf.MoveTowardsAngle(m_orbitAngles.y, headingAngle, rotationChange); //MoveTowardsAngle指从1到2以不超过3的方式移动
         return true;
     }
@@ -261,7 +300,7 @@ public class OrbitCamera : MonoBehaviour
     /// <returns></returns>
     static float GetAngle(Vector2 direction)
     {
-        // 根据反三角函数计算夹角的度数
+        // 1. 根据反三角函数计算夹角的度数
         float angle = Mathf.Acos(direction.y) * Mathf.Rad2Deg;
         return direction.x < 0f ? 360f - angle : angle;
     }

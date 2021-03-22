@@ -1,6 +1,4 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+﻿using UnityEngine;
 
 /// <summary>
 /// 基于物理模拟的小球移动控制
@@ -34,11 +32,14 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     float m_maxAirAcceleration = 1f;
 
     /// <summary>
-    /// 
+    /// 最大跳跃高度
     /// </summary>
     [SerializeField, Range(0f, 10f)]
     float m_jumpHeight = 2f;
 
+    /// <summary>
+    /// 最大地面坡角
+    /// </summary>
     [SerializeField, Range(0f, 90f)]
     float m_maxGroundAngle = 25f;
 
@@ -132,7 +133,7 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     bool OnSteep => m_steepContactCount > 0;
 
     /// <summary>
-    /// 浮空跳的阶段
+    /// 浮空跳的当前阶段
     /// </summary>
     int m_jumpPhase;
 
@@ -169,6 +170,7 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// </summary>
     void OnValidate()
     {
+        // 1. 根据最大爬坡角度计算法线相乘结果用于简化后面计算
         m_minGroundDotProduct = Mathf.Cos(m_maxGroundAngle * Mathf.Deg2Rad);
     }
 
@@ -177,7 +179,9 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// </summary>
     void Awake()
     {
+        // 1. 记录body组件并对参数进行Validate
         m_body = GetComponent<Rigidbody>();
+        m_body.useGravity = false;
         OnValidate();
     }
 
@@ -186,28 +190,31 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// </summary>
     void Update()
     {
-        // 更新并记录速度
+        // 1. 记录输入
         Vector2 playerInput;
         playerInput.x = Input.GetAxis("Horizontal");
         playerInput.y = Input.GetAxis("Vertical");
         playerInput = Vector2.ClampMagnitude(playerInput, 1f);
+        // 2. 如果输入空间被设定
         if (m_playerInputSpace)
         {
-            // 将玩家输入映射到以重力反向为normal的平面
+            // 3. 将玩家输入映射到以重力反向为normal的平面
             m_rightAxis = ProjectOnContactPlane(m_playerInputSpace.right, m_upAxis);
             m_forwardAxis = ProjectOnContactPlane(m_playerInputSpace.forward, m_upAxis);
         }
         else
         {
+            // 4. 设定为世界xz平面
             m_rightAxis = ProjectOnContactPlane(Vector3.right, m_upAxis);
             m_rightAxis = ProjectOnContactPlane(Vector3.forward, m_upAxis);
         }
+        // 5. 更新记录速度
         m_desiredVelocity = new Vector3(playerInput.x, 0f, playerInput.y) * m_maxSpeed;
 
-        // 记录跳跃
+        // 6. 记录跳跃
         m_desiredJump |= Input.GetButtonDown("Jump"); // 本来如果没有down那就是false，用了|=就是两者只要有一个是true就是true
 
-        // 在小球不和地面接触的时候更改小球颜色
+        // 7. 在小球不和地面接触的时候更改小球颜色
         GetComponent<MeshRenderer>().material.SetColor(
             "_Color", OnGround ? Color.black : Color.white
         );
@@ -218,25 +225,27 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// </summary>
     void FixedUpdate()
     {
-        // 记录当前重力反方向
-        m_upAxis = -Physics.gravity.normalized;
-        // 更新当前物体物理状态为Update做准备？
+        // 1. 记录当前重力及反方向
+        Vector3 gravity = CustomGravity.GetGravity(m_body.position, out m_upAxis);
+        // 2. 更新当前物体物理状态为Update做准备
         UpdateState();
-        // 更新速度
+        // 3. 更新速度
         AdjustVelocity();
-        // 如果之前(Update中)按下了跳跃键
+        // 4. 如果之前(Update中)按下了跳跃键
         if (m_desiredJump)
         {
-            // 将“妄图跳跃”重置代表已经进行跳跃
+            // 5. 将“妄图跳跃”重置代表已经进行跳跃
             m_desiredJump = false;
-            // 进行跳跃
-            Jump();
+            // 6. 进行跳跃
+            Jump(gravity);
         }
 
-        // 更新rigidbody速度
+        // 7. 在速度变化上叠加重力影响
+        m_velocity += gravity * Time.deltaTime;
+        // 8. 更新rigidbody速度
         m_body.velocity = m_velocity;
 
-        // 清空为当前帧其他函数记录的状态
+        // 9. 清空为当前帧其他函数记录的状态
         ClearState();
     }
 
@@ -246,7 +255,8 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// <param name="collision">碰撞体</param>
     void OnCollisionEnter(Collision collision)
     {
-        EvaluateCollision(collision); //? 为什么需要两个？
+        // 1. 检测碰撞状态
+        EvaluateCollision(collision);
     }
 
     /// <summary>
@@ -255,6 +265,7 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// <param name="collision"></param>
     void OnCollisionStay(Collision collision)
     {
+        // 1. 检测碰撞状态
         EvaluateCollision(collision);
     }
 
@@ -263,33 +274,40 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// </summary>
     void UpdateState()
     {
+        // 1. 更新计时
         m_stepsSinceLastGrounded += 1;
         m_stepsSinceLastJump += 1;
         m_velocity = m_body.velocity;
+        // 2. 如果处于任何一种非浮空状态
         if (OnGround || SnapToGround() || CheckSteepContacts())
         {
+            // 3. 更新计时器和跳跃计数
             m_stepsSinceLastGrounded = 0;
             if (m_stepsSinceLastJump > 1) // 因为jump后第一帧还是会OnGround，如果这个时候再进行跳跃那就可以无限浮空跳
             {
                 m_jumpPhase = 0;
             }
-            // 如果多个地面才进行和向量的标准化
+            // 4. 如果多个地面才进行和向量的标准化
             if (m_groundContactCount > 1)
             {
                 m_contactNormal.Normalize();
             }
         }
-        // 如果不在地面
+        // 5. 如果处于浮空状态
         else
         {
-            // 每次Update状态的时候记得重置接触方向向上（用于浮空跳之类）
+            // 6. 每次Update状态的时候记得重置接触方向向上（用于浮空跳之类）
             m_contactNormal = m_upAxis;
         }
     }
 
+    /// <summary>
+    /// 清空状态
+    /// 用于下次物理更新
+    /// </summary>
     void ClearState()
     {
-        // 每次fixedUpdate结束时将onGround等接触数据重置于false，在下次物理检测时再行更新
+        // 1. 每次fixedUpdate结束时将onGround等接触数据重置于false，在下次物理检测时再行更新
         m_groundContactCount = 0;
         m_steepContactCount = 0;
         m_contactNormal = Vector3.zero;
@@ -302,29 +320,29 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// <param name="collision">碰撞体</param>
     void EvaluateCollision(Collision collision)
     {
-        // 得到碰撞对象的layer
+        // 1. 得到碰撞对象的layer
         float minDot = GetMinDot(collision.gameObject.layer);
-        // 1. 遍历所有碰撞对象
+        // 2. 遍历所有碰撞对象
         for (int i = 0; i < collision.contactCount; i++)
         {
-            // 2. 得到碰撞接触面法线
+            // 3. 得到碰撞接触面法线
             Vector3 normal = collision.GetContact(i).normal;
-            // 3. 如果坡度小于预设坡度，那么仍视作是地面
+            // 4. 如果坡度小于预设坡度，那么仍视作是地面
             // 计算当前接触面法线在重力方向投影
             float upDot = Vector3.Dot(m_upAxis, normal);
             if (upDot >= minDot)
             {
-                // 4. 增加接触地面计数
+                // 5. 增加接触地面计数
                 m_groundContactCount += 1;
-                // 5. 更新地面接触法线
+                // 6. 更新地面接触法线
                 m_contactNormal += normal;
             }
-            // 否则应为陡壁
+            // 7. 否则应为陡壁
             else if (upDot > -0.01f)
             {
-                // 增加陡壁计数
+                // 8. 增加陡壁计数
                 m_steepContactCount += 1;
-                // 更新陡壁法线
+                // 9. 更新陡壁法线
                 m_steepNormal += normal;
             }
         }
@@ -333,21 +351,21 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// <summary>
     /// 跳！
     /// </summary>
-    void Jump()
+    void Jump(Vector3 gravity)
     {
         Vector3 jumpDirection;
-        // 如果在（等效）地面上，地面法线方向跳跃
+        // 1. 如果在（等效）地面上，地面法线方向跳跃
         if (OnGround)
         {
             jumpDirection = m_contactNormal;
         }
-        // 如果在墙上，墙跳
+        // 2. 如果在墙上，墙跳
         else if (OnSteep)
         {
             jumpDirection = m_steepNormal;
             m_jumpPhase = 0;
         }
-        // 如果在Air，UpdateState中更新了接触法线是向上
+        // 3. 如果在Air，UpdateState中更新了接触法线是向上
         else if (m_maxAirJumps > 0 && m_jumpPhase <= m_maxAirJumps)
         {
             if (m_jumpPhase == 0) //? 处理从地面掉下的多余一次跳跃？相当于这样将掉落视作第一次浮空跳了，这就和其他的跳跃形式齐整了，否则就多一次
@@ -356,25 +374,25 @@ public class MovingSphereWithGravityChange : MonoBehaviour
             }
             jumpDirection = m_contactNormal;
         }
-        // 否则不满足跳跃条件返回
+        // 4. 否则不满足跳跃条件返回
         else
         {
             return;
         }
-        // 重置上次跳跃之后的steps
+        // 5. 重置上次跳跃之后的steps
         m_stepsSinceLastJump = 0;
-        // 记录已经进行的跳跃阶段
+        // 6. 记录已经进行的跳跃阶段
         m_jumpPhase += 1;
-        // 根据设定的跳跃高度计算跳跃速度
-        float jumpSpeed = Mathf.Sqrt(2f * Physics.gravity.magnitude * m_jumpHeight);
-        //? 可能用于浮空跳
+        // 7. 根据设定的跳跃高度计算跳跃速度
+        float jumpSpeed = Mathf.Sqrt(2f * gravity.magnitude * m_jumpHeight);
+        // 8. 根据坡角修正跳跃方向
         jumpDirection = (jumpDirection + m_upAxis).normalized;
         float alignedSpeed = Vector3.Dot(m_velocity, jumpDirection);
         if (alignedSpeed > 0f)
         {
             jumpSpeed = Mathf.Max(jumpSpeed - alignedSpeed, 0f);
         }
-        // 原始速度叠加沿法线方向跳跃速度
+        // 9. 原始速度叠加沿法线方向跳跃速度
         m_velocity += jumpDirection * jumpSpeed;
     }
 
@@ -383,20 +401,20 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// </summary>
     void AdjustVelocity()
     {
-        // 求得当前x、z轴在接触面上的分量
+        // 1. 求得当前x、z轴在接触面上的分量
         Vector3 xAxis = ProjectOnContactPlane(m_rightAxis, m_contactNormal);
         Vector3 zAxis = ProjectOnContactPlane(m_forwardAxis, m_contactNormal);
-        // 求出当前速度（已经沿接触面）沿接触面上两个方向的分量
+        // 2. 求出当前速度（已经沿接触面）沿接触面上两个方向的分量
         float currentX = Vector3.Dot(m_velocity, xAxis);
         float currentZ = Vector3.Dot(m_velocity, zAxis);
-        // 拿到加速度
+        // 3. 拿到加速度
         float acceleration = OnGround ? m_maxAcceleration : m_maxAirAcceleration;
         float maxSpeedChange = acceleration * Time.deltaTime;
-        // 计算当前应到速度
+        // 4. 计算当前应到速度
         float newX = Mathf.MoveTowards(currentX, m_desiredVelocity.x, maxSpeedChange);
         float newZ = Mathf.MoveTowards(currentZ, m_desiredVelocity.z, maxSpeedChange);
 
-        // 将当前速度沿平面的方向进行分配，而非沿水平x、z进行分配
+        // 5. 将当前速度沿平面的方向进行分配，而非沿水平x、z进行分配
         m_velocity += xAxis * (newX - currentX) + zAxis * (newZ - currentZ);
     }
 
@@ -408,7 +426,7 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// <returns>沿当前平面的分量</returns>
     Vector3 ProjectOnContactPlane(Vector3 direction, Vector3 normal)
     {
-        // 利用三角函数及向量运算求得任意向量沿当前接触平面的分量
+        // 1. 利用三角函数及向量运算求得任意向量沿当前接触平面的分量
         return (direction - normal * Vector3.Dot(m_contactNormal, direction)).normalized; //! 点乘不满足交换律
     }
 
@@ -418,35 +436,35 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// <returns>返回是否需要进行移动吸附</returns>
     bool SnapToGround()
     {
-        // 如果已经不是跳起的第一帧那么没必要再Sanp了因为已经正常起飞了 + 如果是跳跃的前两帧也不要snap了
+        // 1. 如果已经不是跳起的第一帧那么没必要再Sanp了因为已经正常起飞了 + 如果是跳跃的前两帧也不要snap了
         if (m_stepsSinceLastGrounded > 1 || m_stepsSinceLastJump <= 2) // 为什么考虑跳跃的前2帧呢？1.跳跃的第一帧仍然是OnGrounded判断可能true 2.跳跃2帧开始必不为OnGrounded不用它来判断了
         {
             return false;
         }
-        // 如果开车已经超速了那飞出去算了
+        // 2. 如果开车已经超速了那飞出去算了
         float speed = m_velocity.magnitude;
         if (speed > m_maxSnapSpeed)
         {
             return false;
         }
-        // 如果下面没地面那么也不需要了
+        // 3. 如果下面没地面那么也不需要了
         if (!Physics.Raycast(m_body.position, -m_upAxis, out RaycastHit hit, m_probeDistance, m_probeMask))
         {
             return false;
         }
-        // 如果下面的地面角度太陡那也不需要了
+        // 4. 如果下面的地面角度太陡那也不需要了
         // 计算出当前接触面法线在重力方向上的投影
         float upDot = Vector3.Dot(m_upAxis, hit.normal);
         if (upDot < GetMinDot(hit.collider.gameObject.layer))
         {
             return false;
         }
-        // 如果需要进行吸附，那么将地面技术设为1，并设置地面法线为当前hit的normal
+        // 5. 如果需要进行吸附，那么将地面技术设为1，并设置地面法线为当前hit的normal
         m_groundContactCount = 1; //? 此时需要将地面接触数量设定为1提示其他函数进行处理
         m_contactNormal = hit.normal;
-        // 速度沿地面法线上的分量
+        // 6. 速度沿地面法线上的分量
         float dot = Vector3.Dot(m_velocity, m_contactNormal);
-        // 如果向下坡方向移动，则求得速度沿斜面的方向的单位向量，并和速度绝对值相乘得到速度方向
+        // 7. 如果向下坡方向移动，则求得速度沿斜面的方向的单位向量，并和速度绝对值相乘得到速度方向
         if (dot > 0f)
         {
             m_velocity = (m_velocity - m_contactNormal * dot).normalized * speed;
@@ -454,33 +472,41 @@ public class MovingSphereWithGravityChange : MonoBehaviour
         return false;
     }
 
+    /// <summary>
+    /// 得到和地面的爬坡角度
+    /// </summary>
+    /// <param name="layer">当前物体所处layer</param>
+    /// <returns>最大爬坡角度的点乘值</returns>
     float GetMinDot(int layer)
     {
-        // 判断是否
+        // 1. 判断是地面还是阶梯并返回不同爬坡角度
         return (m_stairMask & (1 << layer)) == 0 ?
             m_minGroundDotProduct : m_minStairDotProduct; // 注意==和&的优先级
     }
 
+    /// <summary>
+    /// 检查陡壁接触状态
+    /// </summary>
+    /// <returns>是否陡壁稳定</returns>
     bool CheckSteepContacts()
     {
-        // 判断陡壁接触数量，多于一次陡壁接触（夹住时）方可视为稳定地面
+        // 1. 判断陡壁接触数量，多于一次陡壁接触（夹住时）方可视为稳定地面
         if (m_steepContactCount > 1)
         {
             m_steepNormal.Normalize();
-            // 如果等效地面坡度小于最小可用地面坡度
-            // 计算接触面法线在重力反向的投影
+            // 2. 如果等效地面坡度小于最小可用地面坡度
             float upDot = Vector3.Dot(m_upAxis, m_steepNormal);
             if (upDot >= m_minGroundDotProduct)
             {
-                // 视作地面接触，并修改地面接触计数（结合Jump的优先判断Ground可以优先以等效ground进行处理）
+                // 3. 视作地面接触，并修改地面接触计数（结合Jump的优先判断Ground可以优先以等效ground进行处理）
                 m_groundContactCount = 1;
-                // 修改地面接触法线
+                // 4. 修改地面接触法线
                 m_contactNormal = m_steepNormal;
-                // 返回接触成功
+                // 5. 返回接触成功
                 return true;
             }
         }
-        // 返回接触失败
+        // 6. 返回接触失败
         return false;
     }
 }
