@@ -199,14 +199,14 @@ public class MovingSphereWithGravityChange : MonoBehaviour
         if (m_playerInputSpace)
         {
             // 3. 将玩家输入映射到以重力反向为normal的平面
-            m_rightAxis = ProjectOnContactPlane(m_playerInputSpace.right, m_upAxis);
-            m_forwardAxis = ProjectOnContactPlane(m_playerInputSpace.forward, m_upAxis);
+            m_rightAxis = ProjectDirectionOnPlane(m_playerInputSpace.right, m_upAxis);
+            m_forwardAxis = ProjectDirectionOnPlane(m_playerInputSpace.forward, m_upAxis);
         }
         else
         {
             // 4. 设定为世界xz平面
-            m_rightAxis = ProjectOnContactPlane(Vector3.right, m_upAxis);
-            m_rightAxis = ProjectOnContactPlane(Vector3.forward, m_upAxis);
+            m_rightAxis = ProjectDirectionOnPlane(Vector3.right, m_upAxis);
+            m_rightAxis = ProjectDirectionOnPlane(Vector3.forward, m_upAxis);
         }
         // 5. 更新记录速度
         m_desiredVelocity = new Vector3(playerInput.x, 0f, playerInput.y) * m_maxSpeed;
@@ -402,8 +402,8 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     void AdjustVelocity()
     {
         // 1. 求得当前x、z轴在接触面上的分量
-        Vector3 xAxis = ProjectOnContactPlane(m_rightAxis, m_contactNormal);
-        Vector3 zAxis = ProjectOnContactPlane(m_forwardAxis, m_contactNormal);
+        Vector3 xAxis = ProjectDirectionOnPlane(m_rightAxis, m_contactNormal);
+        Vector3 zAxis = ProjectDirectionOnPlane(m_forwardAxis, m_contactNormal);
         // 2. 求出当前速度（已经沿接触面）沿接触面上两个方向的分量
         float currentX = Vector3.Dot(m_velocity, xAxis);
         float currentZ = Vector3.Dot(m_velocity, zAxis);
@@ -424,10 +424,10 @@ public class MovingSphereWithGravityChange : MonoBehaviour
     /// <param name="vector">任意向量</param>
     /// <param name="normal">任意平面法线</param>
     /// <returns>沿当前平面的分量</returns>
-    Vector3 ProjectOnContactPlane(Vector3 direction, Vector3 normal)
+    Vector3 ProjectDirectionOnPlane(Vector3 direction, Vector3 normal)
     {
         // 1. 利用三角函数及向量运算求得任意向量沿当前接触平面的分量
-        return (direction - normal * Vector3.Dot(m_contactNormal, direction)).normalized; //! 点乘不满足交换律
+        return (direction - normal * Vector3.Dot(direction, normal)).normalized; //! 点乘不满足交换律
     }
 
     /// <summary>

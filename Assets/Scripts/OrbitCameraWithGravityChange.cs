@@ -185,7 +185,7 @@ public class OrbitCameraWithGravityChange : MonoBehaviour
         Vector3 castDirection = castLine / castDistance;
 
         // 8. 处理相机和focus之间的遮挡h并更新相机位置及旋转
-        if (Physics.BoxCast(castFrom, CameraHalfExtends, castDirection, out RaycastHit hit, lookRotation, castDistance, obstructionMask)) // box本身不包含方向
+        if (Physics.BoxCast(castFrom, CameraHalfExtends, castDirection, out RaycastHit hit, lookRotation, castDistance, obstructionMask, QueryTriggerInteraction.Ignore)) // box本身不包含方向
         {
             lookPosition = m_focusPoint - lookDirection * (hit.distance + m_regularCamera.nearClipPlane);
         }
@@ -301,7 +301,7 @@ public class OrbitCameraWithGravityChange : MonoBehaviour
     /// </summary>
     /// <returns>是否需要更新</returns>
     bool AutomaticRotation()
-    {   
+    {
         // 1. 如果AFK时间过短则不进行自动控制
         if (Time.unscaledTime - m_lastManualRotationTime < m_alignDelay)
         {
