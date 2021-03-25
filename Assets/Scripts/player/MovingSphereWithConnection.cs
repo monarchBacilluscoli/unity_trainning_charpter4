@@ -5,13 +5,15 @@
 /// +自定义重力支持
 /// +物体联动
 /// +爬墙
+/// +游泳
 /// </summary>
 public class MovingSphereWithConnection : MonoBehaviour
 {
 
     #region 参数设定
 
-    #region 玩家能力及环境要求
+    #region 能力及环境要求
+
     /// <summary>
     /// 最大速度
     /// </summary>
@@ -110,6 +112,45 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// </remarks>
     float m_submergenceRange = 1f;
 
+    /// <summary>
+    /// 浮力率
+    /// </summary>
+    /// <remarks>
+    /// 0表示完全不会受影响，1表示在水中完全浸没受力平衡，2表示在水中会向上和下落一般浮起
+    /// </remarks>
+    [SerializeField, Min(0f)]
+    float m_buoyancy = 1f;
+
+    /// <summary>
+    /// 水阻
+    /// </summary>
+    /// <remarks>
+    /// 对速度的减慢作用
+    /// </remarks>
+    [SerializeField, Range(0f, 10f)]
+    float m_waterDrag = 1f;
+
+    /// <summary>
+    /// 划水门槛
+    /// </summary>
+    /// <remarks>
+    /// 浸水率达到该比例方可游泳
+    /// </remarks>
+    [SerializeField, Range(0.01f, 1f)]
+    float m_swimThreashold = 0.5f;
+
+    /// <summary>
+    /// 最大划水速度
+    /// </summary>
+    [SerializeField, Range(0f, 100f)]
+    float m_maxSwimSpeed = 5f;
+
+    /// <summary>
+    /// 最大划水加速度
+    /// </summary>
+    [SerializeField, Range(0f, 100f)]
+    float m_maxSwimAcceleration = 5f;
+
     #endregion // 环境和玩家能力
 
     #region Layers
@@ -159,15 +200,7 @@ public class MovingSphereWithConnection : MonoBehaviour
 
     #region 游戏中各类数据记录
 
-    /// <summary>
-    /// 输入所在的参考系
-    /// </summary>
-    /// <remarks>
-    /// 用于支持随视角处理输入
-    /// </remarks>
-    [SerializeField]
-    Transform m_playerInputSpace = default;
-
+    #region 环境信息
     /// <summary>
     /// 连接物体的移动速度
     /// </summary>
@@ -207,6 +240,47 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// </summary>
     Vector3 m_upAxis;
 
+    #endregion // 环境信息
+
+    #region 输入状态
+
+    /// <summary>
+    /// 输入所在的参考系
+    /// </summary>
+    /// <remarks>
+    /// 用于支持随视角处理输入
+    /// </remarks>
+    [SerializeField]
+    Transform m_playerInputSpace = default;
+
+    /// <summary>
+    /// 记录玩家输入
+    /// </summary>
+    Vector3 m_playerInput;
+
+    /// <summary>
+    /// 是否意图跳跃
+    /// </summary>
+    bool m_desiredJump;
+
+    /// <summary>
+    /// 是否意图爬墙
+    /// </summary>
+    bool m_desiresClimbing;
+
+    #endregion
+
+    #region Agent信息
+
+    /// <summary>
+    /// 当前物体的rigidbody
+    /// </summary>
+    Rigidbody m_body;
+    /// <summary>
+    /// 用于存储当前物体的renderer
+    /// </summary>
+    MeshRenderer m_meshRenderer;
+
     /// <summary>
     /// 当前右方向
     /// </summary>
@@ -223,6 +297,21 @@ public class MovingSphereWithConnection : MonoBehaviour
     Vector3 m_velocity;
 
     /// <summary>
+    /// 浮空跳的当前阶段
+    /// </summary>
+    int m_jumpPhase;
+
+    /// <summary>
+    /// 自最后一次在地面后的steps（非跳跃）
+    /// </summary>
+    int m_stepsSinceLastGrounded;
+
+    /// <summary>
+    /// 自最后一次跳跃之后的steps
+    /// </summary>
+    int m_stepsSinceLastJump;
+
+    /// <summary>
     /// 是否在水里
     /// </summary>
     /// <value>是否在水里</value>
@@ -237,26 +326,11 @@ public class MovingSphereWithConnection : MonoBehaviour
     float m_submergence = 0f;
 
     /// <summary>
-    /// 浮空跳的当前阶段
+    /// 是否在游泳
     /// </summary>
-    int m_jumpPhase;
+    bool Swimming => m_submergence >= m_swimThreashold;
 
-    /// <summary>
-    /// 记录玩家输入
-    /// </summary>
-    Vector2 m_playerInput;
-
-    /// <summary>
-    /// 是否意图跳跃
-    /// </summary>
-    bool m_desiredJump;
-
-    /// <summary>
-    /// 是否意图爬墙
-    /// </summary>
-    bool m_desiresClimbing;
-
-
+    #endregion
 
     #region 各种点乘结果，方便计算
     /// <summary>
@@ -294,8 +368,6 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// </summary>
     bool Climbing => m_climbContactCount > 0 && m_stepsSinceLastJump > 2; //? 为什么>2？
 
-
-
     /// <summary>
     /// 和地面接触的数量
     /// </summary>
@@ -316,7 +388,7 @@ public class MovingSphereWithConnection : MonoBehaviour
 
     #endregion // 各种接触面数量
 
-    #region Normals
+    #region 各种Normals
     /// <summary>
     /// 当前地面/攀岩面触点的法线求和的方向
     /// </summary>
@@ -343,27 +415,6 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// </remarks>
     Vector3 m_lastClimbNormal;
     #endregion
-
-
-    /// <summary>
-    /// 当前物体的rigidbody
-    /// </summary>
-    Rigidbody m_body;
-    /// <summary>
-    /// 用于存储当前物体的renderer
-    /// </summary>
-    MeshRenderer m_meshRenderer;
-
-    /// <summary>
-    /// 自最后一次在地面后的steps（非跳跃）
-    /// </summary>
-    int m_stepsSinceLastGrounded;
-
-    /// <summary>
-    /// 自最后一次跳跃之后的steps
-    /// </summary>
-    int m_stepsSinceLastJump;
-
 
     #endregion //游戏中各类数据记录
 
@@ -398,7 +449,9 @@ public class MovingSphereWithConnection : MonoBehaviour
         // 1. 记录输入
         m_playerInput.x = Input.GetAxis("Horizontal");
         m_playerInput.y = Input.GetAxis("Vertical");
-        m_playerInput = Vector2.ClampMagnitude(m_playerInput, 1f);
+        //todo 仅当游泳状态时记录游泳的上下移动
+        m_playerInput.z = Swimming ? Input.GetAxis("UpDown") : 0f;
+        m_playerInput = Vector3.ClampMagnitude(m_playerInput, 1f);
         // 2. 如果输入空间被设定
         if (m_playerInputSpace)
         {
@@ -414,18 +467,21 @@ public class MovingSphereWithConnection : MonoBehaviour
         }
 
         // 6. 记录跳跃和爬墙
-        m_desiredJump |= Input.GetButtonDown("Jump"); // 本来如果没有down那就是false，用了|=就是两者只要有一个是true就是true
-        m_desiresClimbing = Input.GetButton("Climb");
+        if (Swimming)
+        {
+            m_desiresClimbing = false;
+        }
+        else
+        {
+            m_desiredJump |= Input.GetButtonDown("Jump"); // 本来如果没有down那就是false，用了|=就是两者只要有一个是true就是true
+            m_desiresClimbing = Input.GetButton("Climb");
+        }
 
         // 7. 在小球在各种不同状态的时候更新小球材质
         GetComponent<MeshRenderer>().material.SetColor(
             "_Color", OnGround ? Color.black : Color.white
         );
-        m_meshRenderer.material = Climbing ? m_climbingMaterial : InWater ? m_swimmingMaterial : m_normalMaterial;
-        // m_meshRenderer.material.color = new Color(m_meshRenderer.material.color.r,
-        //     m_meshRenderer.material.color.g,
-        //     m_meshRenderer.material.color.b,
-        //     1 - m_submergence); // 出水的时候改变颜色的alpha
+        m_meshRenderer.material = Climbing ? m_climbingMaterial : Swimming ? m_swimmingMaterial : m_normalMaterial;
     }
 
     /// <summary>
@@ -437,6 +493,14 @@ public class MovingSphereWithConnection : MonoBehaviour
         Vector3 gravity = CustomGravity.GetGravity(m_body.position, out m_upAxis);
         // 2. 更新当前物体物理状态为Update做准备
         UpdateState();
+
+        //todo 如果在水中，则先添加水阻
+        if (InWater)
+        {
+            // 根据浸没率和水阻、时间计算实际水阻对速度的影响
+            m_velocity *= 1f - m_waterDrag * m_waterDrag * Time.deltaTime; // 阻力在此添加仍能保证之后允许加速 //? 但是一个绝对数量1和一个时间比例是如何ok的？
+        }
+
         // 3. 更新速度
         AdjustVelocity();
         // 4. 如果之前(Update中)按下了跳跃键
@@ -448,16 +512,25 @@ public class MovingSphereWithConnection : MonoBehaviour
             Jump(gravity);
         }
 
+        // todo 如果攀爬
         if (Climbing)
         {
             //todo 增加一项下压力，用于越过墙壁凸角
             m_velocity -= m_contactNormal * (m_maxClimbAcceleration * 0.9f * Time.deltaTime); // 0.9的原因是免得速度抵消被吸到内叫上
         }
+        //todo 如果不攀爬则判断是否在水中（攀爬判定优先）
+        else if (InWater)
+        {
+            //todo 根据浸没率及浮力率计算速度的修正
+            m_velocity += gravity * ((1f - m_submergence * m_buoyancy) * Time.deltaTime);
+        }
+        //todo 如果不在水中则判断是否在地面（水中优先）
         else if (OnGround && m_velocity.sqrMagnitude < 0.01f)
         {
             //todo 增加一项沿斜面法线的下压力，使压力不至于因为这个branch而消失但也不会在很平缓的斜面上缓慢拉动个体
             m_velocity += m_contactNormal * Vector3.Dot(gravity, m_contactNormal) * Time.deltaTime;
         }
+        //todo 如果在地面但同时妄图攀爬
         else if (m_desiresClimbing && OnGround)
         {
             //todo 增加一项与墙面凸角相关的压力，用于从Ground进入攀援
@@ -508,7 +581,7 @@ public class MovingSphereWithConnection : MonoBehaviour
         m_stepsSinceLastJump += 1;
         m_velocity = m_body.velocity;
         // 2. 如果处于任何一种非浮空状态（order matters）
-        if (CheckClimbing() || OnGround || SnapToGround() || CheckSteepContacts())
+        if (CheckClimbing() || OnGround || SnapToGround() || CheckSteepContacts() || CheckSwimming())
         {
             // 3. 更新计时器和跳跃计数
             m_stepsSinceLastGrounded = 0;
@@ -565,6 +638,11 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// <param name="collision">碰撞体</param>
     void EvaluateCollision(Collision collision)
     {
+        //todo 如果物体处于游泳状态，则不进行后期评估，保持当前联动对象
+        if (Swimming)
+        {
+            return;
+        }
         //todo 存储物体的layer以备调用
         int layer = collision.gameObject.layer;
         // 1. 得到碰撞对象的layer
@@ -651,6 +729,11 @@ public class MovingSphereWithConnection : MonoBehaviour
         m_jumpPhase += 1;
         // 7. 根据设定的跳跃高度计算跳跃速度
         float jumpSpeed = Mathf.Sqrt(2f * gravity.magnitude * m_jumpHeight);
+        //todo 根据陷入水中程度修正跳跃高度
+        if (InWater)
+        {
+            jumpSpeed *= Mathf.Max(0f, 1f - m_submergence / m_swimThreashold); // 因为submergence和swimT的关系会导致负值，所以使用Max
+        }
         // 8. 根据坡角修正跳跃方向
         jumpDirection = (jumpDirection + m_upAxis).normalized;
         float alignedSpeed = Vector3.Dot(m_velocity, jumpDirection);
@@ -678,6 +761,15 @@ public class MovingSphereWithConnection : MonoBehaviour
             xAxis = Vector3.Cross(m_contactNormal, m_upAxis);
             zAxis = m_upAxis;
         }
+        //todo 如果划水，则设定速度为划水系列速度。方向和陆上移动一致
+        else if (InWater)
+        {
+            float swimFactor = Mathf.Min(1f, m_submergence / m_swimThreashold);
+            acceleration = Mathf.LerpUnclamped(OnGround ? m_maxAcceleration : m_maxAirAcceleration, m_maxSwimAcceleration, swimFactor);
+            speed = Mathf.LerpUnclamped(m_maxSpeed, m_maxSwimSpeed, swimFactor);
+            xAxis = m_rightAxis;
+            zAxis = m_forwardAxis;
+        }
         else
         {
             acceleration = OnGround ? m_maxAcceleration : m_maxAirAcceleration;
@@ -689,12 +781,12 @@ public class MovingSphereWithConnection : MonoBehaviour
         xAxis = ProjectDirectionOnPlane(xAxis, m_contactNormal);
         zAxis = ProjectDirectionOnPlane(zAxis, m_contactNormal);
 
-        // 2. 求出当前速度（已经沿接触面）沿接触面上两个方向的分量
+        // 2. 求出当前速度（已经沿接触面）沿运动轴上两个方向的分量
         //todo 计算当前物体和联动物体的相对速度，并应用之
         Vector3 relativeVelocity = m_velocity - m_connectionVelocity;
         float currentX = Vector3.Dot(relativeVelocity, xAxis);
         float currentZ = Vector3.Dot(relativeVelocity, zAxis);
-        // 3. 拿到加速度
+        // 3. 拿到一个步长能够加的速度
         float maxSpeedChange = acceleration * Time.deltaTime;
         // 4. 计算当前在各个控制轴上的应到速度
         float newX = Mathf.MoveTowards(currentX, m_playerInput.x * speed, maxSpeedChange);
@@ -702,6 +794,17 @@ public class MovingSphereWithConnection : MonoBehaviour
 
         // 5. 将当前速度沿先前计算的沿平面的方向进行分配，而非沿水平x、z进行分配
         m_velocity += xAxis * (newX - currentX) + zAxis * (newZ - currentZ);
+
+        //todo 最后加上游泳时的上下移动
+        if (Swimming)
+        {
+            //todo 记录当前的Y轴速度
+            float currentY = Vector3.Dot(relativeVelocity, m_upAxis);
+            //todo 将当前Y轴速度向desired速度进行更新
+            float newY = Mathf.MoveTowards(currentY, m_playerInput.z * speed, maxSpeedChange);
+            //todo 将当前Y更新速度叠加到原始速度上
+            m_velocity += m_upAxis * (newY - currentY); // 不使用直接修改Y为newY的原因是Vector3是struct
+        }
     }
 
     /// <summary>
@@ -722,7 +825,7 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// <returns>返回是否需要进行移动吸附</returns>
     bool SnapToGround()
     {
-        // 1. 如果已经不是跳起的第一帧那么没必要再Sanp了因为已经正常起飞了 + 如果是跳跃的前两帧也不要snap了
+        // 1. 如果已经不是跳起的第一帧那么没必要再Sanp了因为已经正常起飞了 + 如果是跳跃的前两帧也不要snap了 + 如果在水里也不要Snap了因为强制的snap会影响水浮力的正常function
         if (m_stepsSinceLastGrounded > 1 || m_stepsSinceLastJump <= 2) // 为什么考虑跳跃的前2帧呢？1.跳跃的第一帧仍然是OnGrounded判断可能true 2.跳跃2帧开始必不为OnGrounded不用它来判断了
         {
             return false;
@@ -745,7 +848,7 @@ public class MovingSphereWithConnection : MonoBehaviour
         {
             return false;
         }
-        // 5. 如果需要进行吸附，那么将地面技术设为1，并设置地面法线为当前hit的normal
+        // 5. 如果需要进行吸附，那么将地面计数设为1，并设置地面法线为当前hit的normal
         m_groundContactCount = 1; //? 此时需要将地面接触数量设定为1提示其他函数进行处理
         m_contactNormal = hit.normal;
         // 6. 速度沿地面法线上的分量
@@ -755,7 +858,7 @@ public class MovingSphereWithConnection : MonoBehaviour
         {
             m_velocity = (m_velocity - m_contactNormal * dot).normalized * speed;
         }
-        //todo 在折弯的时候也更新
+        //todo 在折弯的时候也更新联动物体
         m_connectedBody = hit.rigidbody;
         return true;
     }
@@ -796,6 +899,28 @@ public class MovingSphereWithConnection : MonoBehaviour
         }
         // 6. 返回接触失败
         return false;
+    }
+
+    /// <summary>
+    /// 根据是否Swimming更新信息
+    /// </summary>
+    /// <remarks>
+    /// 包含接触信息等
+    /// </remarks>
+    /// <returns>是否在游泳</returns>
+    bool CheckSwimming()
+    {
+        //todo 如果当前处于游泳状态
+        if (Swimming)
+        {
+            //todo 更新接触信息
+            m_groundContactCount = 0;
+            m_contactNormal = m_upAxis;
+            return true;
+        }
+        //todo 如果并非游泳则返回false
+        return false;
+
     }
 
     /// <summary>
@@ -854,7 +979,7 @@ public class MovingSphereWithConnection : MonoBehaviour
         if ((m_waterMask & (1 << other.gameObject.layer)) != 0)
         {
             //todo 则设置InWater
-            EvaluateSubmergence();
+            EvaluateSubmergence(other);
         }
     }
 
@@ -868,14 +993,14 @@ public class MovingSphereWithConnection : MonoBehaviour
         if ((m_waterMask & (1 << other.gameObject.layer)) != 0)
         {
             //todo 设置InWater
-            EvaluateSubmergence();
+            EvaluateSubmergence(other);
         }
     }
 
     /// <summary>
     /// 评估是否淹水
     /// </summary>
-    void EvaluateSubmergence()
+    void EvaluateSubmergence(Collider collider)
     {
         //todo 如果射线检测到水体
         if (Physics.Raycast(m_body.position + m_submergenceOffset * m_upAxis,
@@ -891,7 +1016,13 @@ public class MovingSphereWithConnection : MonoBehaviour
         }
         else
         {
+            //todo 处理浸没hit在极值的时候办法精确反应的情况
             m_submergence = 1;
+        }
+        //todo 如果游泳的时候，把水体作为联动物体
+        if (Swimming)
+        {
+            m_connectedBody = collider.attachedRigidbody;
         }
     }
 }
