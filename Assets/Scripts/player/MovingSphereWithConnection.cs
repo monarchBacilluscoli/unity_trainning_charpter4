@@ -186,11 +186,56 @@ public class MovingSphereWithConnection : MonoBehaviour
 
     #endregion //Layers
 
-    #region 材质设定
+    #region 外观设定
+
+    /// <summary>
+    /// 小球在空中时的旋转因数
+    /// </summary>
+    [SerializeField]
+    float m_ballAirRotation = 0.5f;
+
+    /// <summary>
+    /// 小球在水中的旋转因数
+    /// </summary>
+    [SerializeField]
+    float m_ballSwimRotation = 2f;
+
+    /// <summary>
+    /// 用于表现滚动的dummy ball
+    /// </summary>
+    [SerializeField]
+    Transform m_ball = default;
+
+    /// <summary>
+    /// 用于表现滚动的ball半径
+    /// </summary>
+    [SerializeField]
+    float m_ballRadius = 0.5f;
+
+    /// <summary>
+    /// 小球旋转时恢复立正的速度
+    /// </summary>
+    /// <remarks>
+    /// （把它看成轮胎！）
+    /// </remarks>
+    [SerializeField]
+    float m_ballAlignSpeed = 180f;
+
+    /// <summary>
+    /// 普通材质
+    /// </summary>
     [SerializeField]
     Material m_normalMaterial = default;
+
+    /// <summary>
+    /// 攀岩材质
+    /// </summary>
     [SerializeField]
     Material m_climbingMaterial = default;
+
+    /// <summary>
+    /// 游泳材质
+    /// </summary>
     [SerializeField]
     Material m_swimmingMaterial = default;
 
@@ -395,6 +440,14 @@ public class MovingSphereWithConnection : MonoBehaviour
     Vector3 m_contactNormal;
 
     /// <summary>
+    /// 接触面法线
+    /// </summary>
+    /// <remarks>
+    /// 用于在Clear状态后仍然可以更新球旋转效果
+    /// </remarks>
+    Vector3 m_lastContactNormal;
+
+    /// <summary>
     /// 当前陡壁的接触法线
     /// </summary>
     /// <remarks>
@@ -414,7 +467,12 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// 做加法处理先前版本被缝隙夹住视作平地的情况
     /// </remarks>
     Vector3 m_lastClimbNormal;
-    #endregion
+
+    /// <summary>
+    /// 上次陡壁法线
+    /// </summary>
+    Vector3 m_lastSteepNormal;
+    #endregion //各种normal
 
     #endregion //游戏中各类数据记录
 
@@ -437,7 +495,7 @@ public class MovingSphereWithConnection : MonoBehaviour
         // 1. 记录body组件并对参数进行Validate
         m_body = GetComponent<Rigidbody>();
         m_body.useGravity = false;
-        m_meshRenderer = GetComponent<MeshRenderer>();
+        m_meshRenderer = m_ball.GetComponent<MeshRenderer>();
         OnValidate();
     }
 
@@ -448,9 +506,9 @@ public class MovingSphereWithConnection : MonoBehaviour
     {
         // 1. 记录输入
         m_playerInput.x = Input.GetAxis("Horizontal");
-        m_playerInput.y = Input.GetAxis("Vertical");
+        m_playerInput.z = Input.GetAxis("Vertical");
         //todo 仅当游泳状态时记录游泳的上下移动
-        m_playerInput.z = Swimming ? Input.GetAxis("UpDown") : 0f;
+        m_playerInput.y = Swimming ? Input.GetAxis("UpDown") : 0f;
         m_playerInput = Vector3.ClampMagnitude(m_playerInput, 1f);
         // 2. 如果输入空间被设定
         if (m_playerInputSpace)
@@ -478,10 +536,11 @@ public class MovingSphereWithConnection : MonoBehaviour
         }
 
         // 7. 在小球在各种不同状态的时候更新小球材质
-        GetComponent<MeshRenderer>().material.SetColor(
-            "_Color", OnGround ? Color.black : Color.white
-        );
-        m_meshRenderer.material = Climbing ? m_climbingMaterial : Swimming ? m_swimmingMaterial : m_normalMaterial;
+        // m_meshRenderer.material.SetColor(
+        //     "_Color", OnGround ? Color.black : Color.white
+        // );
+
+        UpdateBall();
     }
 
     /// <summary>
@@ -618,6 +677,9 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// </summary>
     void ClearState()
     {
+        //todo 在清空信息前记录接触面法线用于更新小球旋转
+        m_lastContactNormal = m_contactNormal;
+        m_lastSteepNormal = m_steepNormal;
         // 1. 每次fixedUpdate结束时将onGround等接触数据重置于false，在下次物理检测时再行更新
         m_groundContactCount = 0;
         m_steepContactCount = 0;
@@ -782,28 +844,22 @@ public class MovingSphereWithConnection : MonoBehaviour
         zAxis = ProjectDirectionOnPlane(zAxis, m_contactNormal);
 
         // 2. 求出当前速度（已经沿接触面）沿运动轴上两个方向的分量
-        //todo 计算当前物体和联动物体的相对速度，并应用之
-        Vector3 relativeVelocity = m_velocity - m_connectionVelocity;
-        float currentX = Vector3.Dot(relativeVelocity, xAxis);
-        float currentZ = Vector3.Dot(relativeVelocity, zAxis);
-        // 3. 拿到一个步长能够加的速度
-        float maxSpeedChange = acceleration * Time.deltaTime;
-        // 4. 计算当前在各个控制轴上的应到速度
-        float newX = Mathf.MoveTowards(currentX, m_playerInput.x * speed, maxSpeedChange);
-        float newZ = Mathf.MoveTowards(currentZ, m_playerInput.y * speed, maxSpeedChange);
-
+        //todo 应用当前物体和联动物体的相对速度(即控制速度)
+        Vector3 relativeVelocity = m_velocity - m_connectionVelocity; //! 这里的m_velocity是全局的和速度！
+        //todo 计算当前输入的预期速度和当前速度的差值并作为其修正值
+        Vector3 adjustment;
+        adjustment.x = m_playerInput.x * speed - Vector3.Dot(relativeVelocity, xAxis);
+        adjustment.z = m_playerInput.z * speed - Vector3.Dot(relativeVelocity, zAxis);
+        adjustment.y = Swimming ? m_playerInput.y * speed - Vector3.Dot(relativeVelocity, m_upAxis) : 0f;
+        //todo 统一进行Clamp，而不是每个维度单独进行clamp
+        adjustment = Vector3.ClampMagnitude(adjustment, acceleration * Time.deltaTime);
         // 5. 将当前速度沿先前计算的沿平面的方向进行分配，而非沿水平x、z进行分配
-        m_velocity += xAxis * (newX - currentX) + zAxis * (newZ - currentZ);
+        m_velocity += xAxis * adjustment.x + zAxis * adjustment.z;
 
         //todo 最后加上游泳时的上下移动
         if (Swimming)
         {
-            //todo 记录当前的Y轴速度
-            float currentY = Vector3.Dot(relativeVelocity, m_upAxis);
-            //todo 将当前Y轴速度向desired速度进行更新
-            float newY = Mathf.MoveTowards(currentY, m_playerInput.z * speed, maxSpeedChange);
-            //todo 将当前Y更新速度叠加到原始速度上
-            m_velocity += m_upAxis * (newY - currentY); // 不使用直接修改Y为newY的原因是Vector3是struct
+            m_velocity += m_upAxis * adjustment.y; // 不使用直接修改Y为newY的原因是Vector3是struct
         }
     }
 
@@ -825,8 +881,8 @@ public class MovingSphereWithConnection : MonoBehaviour
     /// <returns>返回是否需要进行移动吸附</returns>
     bool SnapToGround()
     {
-        // 1. 如果已经不是跳起的第一帧那么没必要再Sanp了因为已经正常起飞了 + 如果是跳跃的前两帧也不要snap了 + 如果在水里也不要Snap了因为强制的snap会影响水浮力的正常function
-        if (m_stepsSinceLastGrounded > 1 || m_stepsSinceLastJump <= 2) // 为什么考虑跳跃的前2帧呢？1.跳跃的第一帧仍然是OnGrounded判断可能true 2.跳跃2帧开始必不为OnGrounded不用它来判断了
+        // 1. 如果已经跳起 || 刚刚预备跳跃而不是跳了好久了则不要snap
+        if (m_stepsSinceLastGrounded > 1 || m_stepsSinceLastJump <= 2)
         {
             return false;
         }
@@ -1023,6 +1079,121 @@ public class MovingSphereWithConnection : MonoBehaviour
         if (Swimming)
         {
             m_connectedBody = collider.attachedRigidbody;
+        }
+    }
+
+    /// <summary>
+    /// 避免对地面的吸附
+    /// </summary>
+    /// <remarks>
+    /// 用于JumpPad等对其进行调用
+    /// </remarks>
+    public void PreventSnapToGround()
+    {
+        //todo 设定从上次跳跃开始的steps是-1
+        m_stepsSinceLastJump = -1; //! 一个trick，使SnapToGround视其为“刚刚”跳跃（数值很小，但又不是正常数值）
+    }
+
+    /// <summary>
+    /// 更新附属子ball的状态
+    /// </summary>
+    void UpdateBall()
+    {
+        //todo 根据状态更新小球材质信息
+        Material ballMaterial = m_normalMaterial;
+        Vector3 rotationPlaneNormal = m_lastContactNormal;
+        //todo 应用小球在不同环境中的旋转因数
+        float m_rotationFactor = 1f;
+        if (Climbing)
+        {
+            ballMaterial = m_climbingMaterial;
+        }
+        else if (Swimming)
+        {
+            m_rotationFactor = m_ballSwimRotation;
+            ballMaterial = m_swimmingMaterial;
+        }
+        //todo 如果并非在地面，则使用上次的陡壁的法线
+        else if (!OnGround)
+        {
+            if (OnSteep)
+            {
+                m_lastContactNormal = m_lastSteepNormal;
+            }
+            else
+            {
+                m_rotationFactor = m_ballAirRotation;
+            }
+        }
+        m_meshRenderer.material = ballMaterial;
+
+        //todo 根据速度计算移动距离
+        Vector3 movement = m_body.velocity * Time.deltaTime;
+        //todo 原始movement减掉在平面法线方向上的分量
+        movement -= rotationPlaneNormal * Vector3.Dot(movement, rotationPlaneNormal);
+        float distance = movement.magnitude;
+
+        Quaternion rotation = m_ball.localRotation;
+        //todo 如果当前联动物体仍然是先前连动物体
+        if (m_connectedBody && m_connectedBody == m_previousConnectionBody)
+        {
+            //todo 计算当前物体的旋转
+            rotation = Quaternion.Euler(
+                m_connectedBody.angularVelocity * (Mathf.Rad2Deg * Time.deltaTime)
+            ) * rotation;
+            //todo 仅在本体移动距离非常近的时候更新联动旋转
+            if (distance < 0.001f)
+            {
+                m_ball.localRotation = rotation;
+                return;
+            }
+        }
+        else if (distance < 0.001f)
+        {
+            return;
+        }
+        //todo 根据移动距离计算旋转角度(应用旋转因数)
+        float angle = distance * m_rotationFactor * (180 / Mathf.PI) / m_ballRadius;
+        //todo 根据接触法线移动方向更新旋转轴
+        Vector3 rotationAxis = Vector3.Cross(rotationPlaneNormal, movement).normalized;
+        //todo 根据角度更新小球移动旋转
+        rotation = Quaternion.Euler(rotationAxis * angle) * rotation;
+        //todo 
+        if (m_ballAlignSpeed > 0f)
+        {
+            rotation = AlignBallRotation(rotationAxis, rotation, distance);
+        }
+        m_ball.localRotation = rotation;
+    }
+
+    /// <summary>
+    ///? 矫正当前小球的旋转方向
+    /// </summary>
+    /// <param name="rotationAxis"></param>
+    /// <param name="rotation"></param>
+    /// <returns></returns>
+    Quaternion AlignBallRotation(Vector3 rotationAxis, Quaternion rotation, float traveledDistance)
+    {
+        // 1. 得到小球的上方向
+        Vector3 ballAxis = m_ball.up; // 由当前重力纵轴确定
+        // 2. 得到旋转的角度值
+        float dot = Mathf.Clamp(Vector3.Dot(ballAxis, rotationAxis), -1f, 1f); // 精度问题可能会超出有效范围，造成非预期后果所以clamp之
+        float angle = Mathf.Acos(dot) * Mathf.Rad2Deg;
+        // 3. 计算当前帧最大旋转矫正速度
+        float maxAngle = m_ballAlignSpeed * traveledDistance;
+
+        // 4。由两个纵轴插值和起始旋转求得目标旋转
+        Quaternion newAlignment = Quaternion.FromToRotation(ballAxis, rotationAxis) * rotation;
+
+        // 5. 如果所需旋转角不大于旋转速度，则不进行旋转
+        if (angle <= maxAngle)
+        {
+            return newAlignment;
+        }
+        // 6. 如果所需旋转角大于旋转速度，则进行旋转
+        else
+        {
+            return Quaternion.SlerpUnclamped(rotation, newAlignment, maxAngle / angle); // 由于插值比例保证合理，所以“Unclamped”
         }
     }
 }
